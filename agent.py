@@ -37,13 +37,14 @@ class GeminiAgent:
 
         # Stream from Gemini
         full_response = ""
-        async for chunk in self._client.aio.models.generate_content_stream(
+        response_stream = await self._client.aio.models.generate_content_stream(
             model=self._model,
             contents=history,
             config=types.GenerateContentConfig(
                 system_instruction=self._system_instruction,
             ),
-        ):
+        )
+        async for chunk in response_stream:
             if chunk.text:
                 full_response += chunk.text
                 yield (False, chunk.text)
