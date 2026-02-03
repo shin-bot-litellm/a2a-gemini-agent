@@ -9,4 +9,4 @@ COPY . ./
 
 EXPOSE 8001
 
-CMD ["uvicorn", "agent:a2a_app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["python", "__main__.py"]

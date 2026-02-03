@@ -24,7 +24,7 @@ Get a key at: https://aistudio.google.com/apikey
 ### 3. Run the agent
 
 ```bash
-uvicorn agent:a2a_app --host localhost --port 8001
+python __main__.py
 ```
 
 ### 4. Test it
@@ -50,9 +50,32 @@ docker run -p 8001:8001 -e GOOGLE_API_KEY=your_key_here a2a-gemini-agent
 
 Set the environment variable `GOOGLE_API_KEY` and deploy. The `PORT` env var is respected automatically.
 
+## Streaming
+
+This agent supports both `message/send` and `message/stream`. To stream:
+
+```bash
+curl -X POST http://localhost:8001/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "1",
+    "method": "message/stream",
+    "params": {
+      "message": {
+        "role": "user",
+        "messageId": "msg-001",
+        "parts": [{"kind": "text", "text": "Tell me a joke"}]
+      }
+    }
+  }'
+```
+
 ## What's Inside
 
-- `agent.py` — The agent definition (Gemini + Google Search tool)
+- `agent.py` — Gemini agent with Google Search tool + streaming
+- `agent_executor.py` — A2A executor bridging ADK ↔ A2A protocol
+- `__main__.py` — Server entry point with agent card config
 - `test_client.py` — Simple A2A client to test the agent
 - `Dockerfile` — Container-ready
 - `requirements.txt` — Dependencies
