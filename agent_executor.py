@@ -1,4 +1,4 @@
-"""A2A AgentExecutor that bridges the Gemini agent with the A2A protocol."""
+"""A2A AgentExecutor with true progressive token streaming."""
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
@@ -16,7 +16,7 @@ from agent import GeminiAgent
 
 
 class GeminiAgentExecutor(AgentExecutor):
-    """Executor that supports both regular and streaming responses."""
+    """Executor that streams token-by-token as SSE artifact-update events."""
 
     def __init__(self) -> None:
         self.agent = GeminiAgent()
@@ -35,20 +35,16 @@ class GeminiAgentExecutor(AgentExecutor):
 
         updater = TaskUpdater(event_queue, task.id, task.context_id)
 
-        async for finished, text in self.agent.stream(query, task.context_id):
-            if not finished:
-                await updater.update_status(
-                    TaskState.working,
-                    new_agent_text_message(text, task.context_id, task.id),
-                )
-                continue
+        async for is_final, text in self.agent.stream(query, task.context_id):
+            if is_final:
+                await updater.complete()
+                break
 
+            # Send each chunk as an artifact-update SSE event
             await updater.add_artifact(
                 [Part(root=TextPart(text=text))],
                 name="response",
             )
-            await updater.complete()
-            break
 
     async def cancel(
         self, context: RequestContext, event_queue: EventQueue

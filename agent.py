@@ -1,70 +1,59 @@
-"""Gemini agent using Google ADK with streaming support."""
+"""Gemini agent using google.genai directly for true token-level streaming."""
 
 from collections.abc import AsyncIterable
 
-from google.adk import Runner
-from google.adk.agents import LlmAgent
-from google.adk.artifacts import InMemoryArtifactService
-from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
-from google.adk.sessions import InMemorySessionService
-from google.adk.tools import google_search
+from google import genai
 from google.genai import types
 
 
-def create_agent() -> LlmAgent:
-    return LlmAgent(
-        name="gemini_agent",
-        model="gemini-2.5-flash-lite",
-        description="A helpful AI assistant powered by Gemini.",
-        instruction=(
-            "You are a helpful AI assistant. Answer questions clearly and concisely. "
-            "Use Google Search when you need up-to-date information."
-        ),
-        tools=[google_search],
-    )
-
-
 class GeminiAgent:
-    """Wraps the ADK agent with session management and streaming."""
+    """Streams tokens progressively from Gemini."""
 
-    def __init__(self) -> None:
-        self._agent = create_agent()
-        self._user_id = "a2a_user"
-        self._runner = Runner(
-            app_name=self._agent.name,
-            agent=self._agent,
-            artifact_service=InMemoryArtifactService(),
-            session_service=InMemorySessionService(),
-            memory_service=InMemoryMemoryService(),
+    def __init__(self, model: str = "gemini-2.5-flash-lite") -> None:
+        self._model = model
+        self._client = genai.Client()
+        self._system_instruction = (
+            "You are a helpful AI assistant. Answer questions clearly and concisely."
         )
+        # Track conversation history per session
+        self._sessions: dict[str, list[types.Content]] = {}
 
     async def stream(
         self, query: str, session_id: str
     ) -> AsyncIterable[tuple[bool, str]]:
-        session = await self._runner.session_service.get_session(
-            app_name=self._agent.name,
-            user_id=self._user_id,
-            session_id=session_id,
-        )
-        if session is None:
-            session = await self._runner.session_service.create_session(
-                app_name=self._agent.name,
-                user_id=self._user_id,
-                state={},
-                session_id=session_id,
-            )
+        """Yield (is_final, text_chunk) tuples as tokens arrive from Gemini."""
 
-        content = types.Content(
+        # Get or create session history
+        if session_id not in self._sessions:
+            self._sessions[session_id] = []
+
+        history = self._sessions[session_id]
+
+        # Add user message to history
+        user_content = types.Content(
             role="user", parts=[types.Part.from_text(text=query)]
         )
+        history.append(user_content)
 
-        async for event in self._runner.run_async(
-            user_id=self._user_id, session_id=session.id, new_message=content
+        # Stream from Gemini
+        full_response = ""
+        async for chunk in self._client.aio.models.generate_content_stream(
+            model=self._model,
+            contents=history,
+            config=types.GenerateContentConfig(
+                system_instruction=self._system_instruction,
+            ),
         ):
-            if event.is_final_response():
-                response = "\n".join(
-                    [p.text for p in event.content.parts if p.text]
-                )
-                yield (True, response)
-            else:
-                yield (False, "working...")
+            if chunk.text:
+                full_response += chunk.text
+                yield (False, chunk.text)
+
+        # Add assistant response to history
+        history.append(
+            types.Content(
+                role="model", parts=[types.Part.from_text(text=full_response)]
+            )
+        )
+
+        # Final signal
+        yield (True, "")
